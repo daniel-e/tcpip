@@ -1,5 +1,12 @@
-all: tcpsyn
+all: tcpsyn tcpsyn_srv tcpsyn_cli
 
-syn_tcp: syn_tcp.cc
+tcpsyn: tcpsyn.cc
 	g++ -O2 tcpsyn.cc -std=c++11 -o tcpsyn
 
+tcpsyn_srv: tcpsyn_srv.cc
+	g++ -O2 -std=c++11 tcpsyn_srv.cc -o tcpsyn_srv
+
+tcpsyn_cli: tcpsyn_cli.cc
+	g++ -O2 -std=c++11 tcpsyn_cli.cc -o tcpsyn_cli -lpcap
+clean:
+	rm -f tcpsyn tcpsyn_srv 

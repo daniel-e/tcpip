@@ -1,14 +1,9 @@
-#include <assert.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netinet/tcp.h>  // struct tcphdr
-#include <stdlib.h>
 #include <time.h>
-#include <unistd.h>
-#include <cstring>
-#include <cstdio>
+#include <unistd.h>  // close
 #include <iostream>
+
+#include "pseudo.hh"
+#include "tcp.hh"
 
 // usage:
 // 1) nc -l 8080
@@ -16,46 +11,6 @@
 // 3) sudo ./syn_tcp
 
 // man 7 raw, man 7 packet, man 7 socket
-
-// pseudo tcp header; required to compute the tcp checksum
-class pseudo {
-public:
-	in_addr_t src;
-	in_addr_t dst;
-	u_int8_t  zero = 0;
-	u_int8_t  protocol = 6;    // tcp
-	u_int16_t len;
-
-	pseudo(const char* src, const char* dst) :
-	src(inet_addr(src)), dst(inet_addr(dst)), len(htons(sizeof(tcphdr))) { }
-
-	// http://tools.ietf.org/html/rfc793
-	// http://tools.ietf.org/html/rfc1071
-	// http://locklessinc.com/articles/tcp_checksum/
-	u_int16_t chksum(const char* buffer, int size) const
-	{
-		u_int32_t sum = 0;
-		for (int i = 0; i < size - 1; i += 2) {
-			sum += *(unsigned short*) &buffer[i];
-		}
-		if (size & 1) sum += (unsigned) (unsigned char) buffer[size - 1];
-		while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
-		return ~sum;
-	}
-};
-
-class tcp
-{
-public:
-	pseudo psdh; // pseudo tcp header followed by ...
-	tcphdr tcph; // tcp header
-
-	tcp(const char* src, const char* dst) : psdh(src, dst) 
-	{ memset(&tcph, 0, sizeof(tcphdr)); }
-
-	void update_chksum()
-	{ tcph.th_sum = psdh.chksum((const char*) &psdh, sizeof(pseudo) + sizeof(tcphdr)); }
-};
 
 int main() 
 {
