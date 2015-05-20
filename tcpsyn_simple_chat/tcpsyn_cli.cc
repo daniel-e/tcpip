@@ -1,11 +1,11 @@
 #include <netinet/tcp.h>  // struct tcphdr
 #include <netdb.h>        // gethostbyname
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <cstdio>
 #include <iostream>
 #include <boost/program_options.hpp>
-
-#include "../tcp.hh"
-#include "../pseudo.hh"
 
 namespace po = boost::program_options;
 
@@ -14,6 +14,33 @@ namespace po = boost::program_options;
 int         port;
 std::string dsthost;
 std::string srchost;
+
+typedef struct
+{
+	// pseudo header
+	in_addr_t src;
+	in_addr_t dst;
+	u_int8_t  zero = 0;
+	u_int8_t  protocol = 6;    // tcp
+	u_int16_t len;
+
+	// tcp header
+	tcphdr tcph;
+} pseudo_and_tcp;
+
+// http://tools.ietf.org/html/rfc793
+// http://tools.ietf.org/html/rfc1071
+// http://locklessinc.com/articles/tcp_checksum/
+u_int16_t chksum(const char* buffer, int size)
+{
+	u_int32_t sum = 0;
+	for (int i = 0; i < size - 1; i += 2) {
+		sum += *(unsigned short*) &buffer[i];
+	}
+	if (size & 1) sum += (unsigned) (unsigned char) buffer[size - 1];
+	while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+	return ~sum;
+}
 
 void send_data(u_int32_t data) 
 {
@@ -31,20 +58,25 @@ void send_data(u_int32_t data)
 	s.sin_addr.s_addr = inet_addr(dsthost.c_str());
 
 	// create the packet
-	tcp t(srchost.c_str(), dsthost.c_str());
+	pseudo_and_tcp pt;
+	pt.src = inet_addr(srchost.c_str());
+	pt.dst = inet_addr(dsthost.c_str());
+	pt.len = htons(sizeof(tcphdr));
 
-	t.tcph.th_dport = htons(port);
-	t.tcph.th_sport = htons(30000 + rand() % 20000);
-	t.tcph.th_seq = htonl(data);
-	t.tcph.th_ack = 0;
-	t.tcph.th_off = 5; // size of tcp header in 32-bit words
-	t.tcph.th_x2 = 0;
-	t.tcph.th_flags = TH_SYN;
-	t.tcph.th_win = htons(32767);
-	t.tcph.th_urp = 0;
-	t.update_chksum();
+	pt.tcph.th_dport = htons(port);
+	pt.tcph.th_sport = htons(30000 + rand() % 20000);
+	pt.tcph.th_seq = htonl(data);
+	pt.tcph.th_ack = 0;
+	pt.tcph.th_off = 5; // size of tcp header in 32-bit words
+	pt.tcph.th_x2 = 0;
+	pt.tcph.th_flags = TH_SYN;
+	pt.tcph.th_win = htons(32767);
+	pt.tcph.th_sum = 0;
+	pt.tcph.th_urp = 0;
 
-	if (sendto(sd, &t.tcph, sizeof(t.tcph), 0, (struct sockaddr*) &s, sizeof(s)) < 0) {
+	pt.tcph.th_sum = chksum((const char*) &pt, sizeof(pseudo_and_tcp));
+	
+	if (sendto(sd, &pt.tcph, sizeof(pt.tcph), 0, (struct sockaddr*) &s, sizeof(s)) < 0) {
 		perror("sendto() error");
 	}
 
