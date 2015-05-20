@@ -2,8 +2,8 @@
 #include <unistd.h>  // close
 #include <iostream>
 
-#include "pseudo.hh"
-#include "tcp.hh"
+#include "../pseudo.hh"
+#include "../tcp.hh"
 
 // usage:
 // 1) nc -l 8080
