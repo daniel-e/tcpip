@@ -1,9 +1,13 @@
 #include <netinet/tcp.h>  // struct tcphdr
+#include <netdb.h>        // gethostbyname
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>       // close
 #include <string.h>
 #include <iostream>
+#include <boost/program_options.hpp>
+
+namespace po = boost::program_options;
 
 struct icmp
 {
@@ -29,10 +33,26 @@ u_int16_t chksum(const char* buffer, int size)
 	return ~sum;
 }
 
-int main() 
+int main(int ac, char** av) 
 {
-	const char* srcip = "10.21.40.198";
-	const char* dstip = "193.99.144.80";
+	std::string dsthost = "127.0.0.1";
+
+	// parse options
+	po::options_description desc("Options");
+	desc.add_options()
+		("help,h", "this help message")
+		("dst,d", po::value<std::string>(&dsthost)->default_value("127.0.0.1"), "destination host/ip")
+	;
+	po::variables_map vm;
+	po::store(po::parse_command_line(ac, av, desc), vm);
+	po::notify(vm);
+
+	if (vm.count("help")) {
+		std::cerr << desc << std::endl;
+		return 1;
+	}
+
+	dsthost = inet_ntoa(*((struct in_addr*) gethostbyname(dsthost.c_str())->h_addr));
 
 	struct icmp i;
 
@@ -53,7 +73,7 @@ int main()
 
 	struct sockaddr_in s;
 	s.sin_family = AF_INET;
-	s.sin_addr.s_addr = inet_addr(dstip);
+	s.sin_addr.s_addr = inet_addr(dsthost.c_str());
 
 	if (sendto(sd, &i, sizeof(struct icmp), 0, (struct sockaddr*) &s, sizeof(s)) < 0) {
 		perror("sendto() error");
