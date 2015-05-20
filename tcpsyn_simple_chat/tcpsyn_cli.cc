@@ -1,10 +1,11 @@
-#include <netdb.h>  // gethostbyname
+#include <netinet/tcp.h>  // struct tcphdr
+#include <netdb.h>        // gethostbyname
 #include <cstdio>
 #include <iostream>
 #include <boost/program_options.hpp>
 
-#include "tcp.hh"
-#include "pseudo.hh"
+#include "../tcp.hh"
+#include "../pseudo.hh"
 
 namespace po = boost::program_options;
 
