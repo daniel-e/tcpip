@@ -1,62 +1,96 @@
-#include <netinet/tcp.h>  // struct tcphdr
-#include <pcap.h>
+#include <netdb.h>  // gethostbyname
+#include <cstdio>
 #include <iostream>
+#include <boost/program_options.hpp>
 
-#define LISTENPORT    "54321"
-#define SIZE_ETHERNET 14
-#define IP_SIZE       20
+#include "tcp.hh"
+#include "pseudo.hh"
 
-void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
+namespace po = boost::program_options;
+
+#define DEFAULT_PORT 54321
+
+int         port;
+std::string dsthost;
+std::string srchost;
+
+void send_data(u_int32_t data) 
 {
-	const tcphdr* tcp = (tcphdr*)(packet + SIZE_ETHERNET + IP_SIZE);
+	int sd;
+	struct sockaddr_in s;
 
-	u_int32_t x = tcp->th_seq; // no ntohl
-	for (; x; x = x >> 8) {
-		char c = x & 0xff;
-		std::cout << c;
+	// open socket and send packet
+	if ((sd = socket(PF_INET, SOCK_RAW, IPPROTO_TCP)) < 0) {
+		perror("socket() error");
+		return;
+	}
+
+	s.sin_family = AF_INET;
+	s.sin_port = htons(port);
+	s.sin_addr.s_addr = inet_addr(dsthost.c_str());
+
+	// create the packet
+	tcp t(srchost.c_str(), dsthost.c_str());
+
+	t.tcph.th_dport = htons(port);
+	t.tcph.th_sport = htons(30000 + rand() % 20000);
+	t.tcph.th_seq = htonl(data);
+	t.tcph.th_ack = 0;
+	t.tcph.th_off = 5; // size of tcp header in 32-bit words
+	t.tcph.th_x2 = 0;
+	t.tcph.th_flags = TH_SYN;
+	t.tcph.th_win = htons(32767);
+	t.tcph.th_urp = 0;
+	t.update_chksum();
+
+	if (sendto(sd, &t.tcph, sizeof(t.tcph), 0, (struct sockaddr*) &s, sizeof(s)) < 0) {
+		perror("sendto() error");
+	}
+
+	close(sd);
+}
+
+void send_msg(const std::string& s)
+{
+	for (unsigned i = 0; i < s.size();) {
+		u_int32_t x = 0;
+		for (unsigned j = 0; j < 4 && i < s.size(); ++j, ++i) {
+			x = (x << 8) | s[i];
+		}
+		send_data(x);
 	}
 }
 
-pcap_t* setup_pcap(const char* dev, const char* filter)
+int main(int ac, char** av)
 {
-	char errbuf[PCAP_ERRBUF_SIZE];
+	srand(time(0));
 
-	pcap_t* handle = pcap_open_live(dev, PCAP_ERRBUF_SIZE, 1, 1000, errbuf);
-	if (!handle) {
-		std::cerr << "Could not open device " << dev << " " << errbuf << std::endl;
-		exit(2);
+	// parse options
+	po::options_description desc("Options");
+	desc.add_options()
+		("help,h", "this help message")
+		("dst,d", po::value<std::string>(&dsthost)->default_value("127.0.0.1"), "destination host/ip")
+		("src,s", po::value<std::string>(&srchost)->default_value("127.0.0.1"), "source host/ip")
+		("port,p", po::value<int>(&port)->default_value(DEFAULT_PORT), "destination port")
+	;
+	po::variables_map vm;
+	po::store(po::parse_command_line(ac, av, desc), vm);
+	po::notify(vm);
+
+	if (vm.count("help")) {
+		std::cerr << desc << std::endl;
+		return 1;
 	}
 
-	struct bpf_program bpf;
-	bpf_u_int32 mask;
-	bpf_u_int32 net;
-	if (pcap_lookupnet(dev, &net, &mask, errbuf) == -1) {
-		fprintf(stderr, "Can't get netmask for device %s\n", dev);
-		net = 0;
-		mask = 0;
+	dsthost = inet_ntoa(*((struct in_addr*) gethostbyname(dsthost.c_str())->h_addr));
+	srchost = inet_ntoa(*((struct in_addr*) gethostbyname(srchost.c_str())->h_addr));
+
+	std::cout << srchost << " -> " << dsthost << ":" << port << std::endl;
+
+	// read from stdin and send data via SYN packets
+	std::string s;
+	while (std::getline(std::cin, s)) {
+		send_msg(s + "\n");
 	}
-
-	if (pcap_compile(handle, &bpf, filter, 0, net) == -1) {
-		std::cerr << "Could not set filter" << std::endl;
-		exit(1);
-	}
-
-	if (pcap_setfilter(handle, &bpf) == -1) {
-		fprintf(stderr, "Couldn't install filter %s: %s\n", filter, pcap_geterr(handle));
-		exit(2);
-	}
-	return handle;
-}
-
-int main()
-{
-	const char* dev = "lo";
-	const char* filter = "tcp && port " LISTENPORT;
-
-	pcap_t* handle = setup_pcap(dev, filter);
-
-	std::cout << "listening..." << std::endl;
-	pcap_loop(handle, -1, got_packet, 0);
-	pcap_close(handle);
 }
 
