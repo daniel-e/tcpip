@@ -6,7 +6,9 @@
 #include <iostream>
 #include <boost/program_options.hpp>
 
-#include "net.hh"
+extern "C" {
+#include "net.h"
+}
 
 namespace po = boost::program_options;
 
@@ -39,7 +41,8 @@ int main(int ac, char** av)
 
 	recv_callback("eth0", f);
 	sleep(1);
-	send_msg(ip, "hello", 5);
+	std::string s = "hello world";
+	send_msg(ip, s.c_str(), s.size());
 	sleep(2);
 }
 

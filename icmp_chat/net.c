@@ -8,7 +8,7 @@
 #include <pcap.h>
 #include <pthread.h>
 
-#include "net.hh"
+#include "net.h"
 
 #define SIZE_ETHERNET    14
 #define MAGIC 0xa387
@@ -19,7 +19,9 @@
 u_int16_t chksum(const char* buffer, int size)
 {
 	u_int32_t sum = 0;
-	for (int i = 0; i < size - 1; i += 2) {
+	int i;
+
+	for (i = 0; i < size - 1; i += 2) {
 		sum += *(unsigned short*) &buffer[i];
 	}
 	if (size & 1) sum += (unsigned) (unsigned char) buffer[size - 1];
@@ -37,7 +39,7 @@ struct icmp
 };
 
 
-u_int16_t send_msg(const char* dstip, const char* buf, unsigned size)
+u_int16_t send_msg(const char* dstip, const char* buf, u_int16_t size)
 {
 	u_int32_t ret    = (u_int32_t) -1;
 	char*     packet = (char*) malloc(sizeof(struct icmp) + size);
@@ -119,7 +121,6 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 {
 	if (!h->len || h->len < SIZE_ETHERNET + 20) return;
 
-	const u_char* p = packet;
 	packet += SIZE_ETHERNET;
 
 	u_int16_t iphdrlen = *packet & 0xf;       // little endian
@@ -128,7 +129,7 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 
 	if (iplen < iphdrlen * 4) return;
 	if (proto != 1) return;
-	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(icmp)) return;
+	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(struct icmp)) return;
 
 	packet += iphdrlen * 4;
 	struct icmp* i = (struct icmp*) packet;
@@ -141,7 +142,7 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 	packet += sizeof(struct icmp);
 
 	if (iphdrlen * 4 + sizeof(struct icmp) > iplen) return;
-	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(icmp) + datalen) return;
+	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(struct icmp) + datalen) return;
 
 	void(*callback)(const char* buf, int, int) = (void (*)(const char*, int, int)) args;
 	callback((const char*) packet, datalen, type);
@@ -159,9 +160,10 @@ static void* do_callback(void* args)
 	pcap_loop(a->handle, -1, got_packet, (u_char*) a->callback);
 	pcap_close(a->handle);
 	free(a);
+	return 0;
 }
 
-bool recv_callback(const char* dev, void(*callback)(const char*, int, int)) {
+int recv_callback(const char* dev, void(*callback)(const char*, int, int)) {
 
 	pcap_t* handle = setup_pcap(dev, "icmp");
 	if (handle) {
@@ -172,9 +174,9 @@ bool recv_callback(const char* dev, void(*callback)(const char*, int, int)) {
 		int r = pthread_create(&t, NULL, &do_callback, (void*) args);
 		if (r != 0) {
 			fprintf(stderr, "could not create thread");
-			return false;
+			return -1;
 		}
-	}
-	return (handle != 0);
+	} else return -1;
+	return 0;
 }
 

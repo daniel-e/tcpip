@@ -1,16 +1,14 @@
 FLAGS      = -O2 -std=c++11
 LIBS       = -lboost_program_options -lpcap -lpthread
-SOURCES    = main.cc net.cc
-OBJECTS    = $(SOURCES:.cc=.o)
-EXECUTABLE = main
 
-all: $(SOURCES) $(EXECUTABLE)
+all: libnet main
 
-$(EXECUTABLE): $(OBJECTS)
-	g++ $(FLAGS) $(OBJECTS) -o $@ $(LIBS)
+libnet:
+	gcc -c -O2 -Wall -Werror -fpic net.c
+	gcc -shared -o libnet.so net.o
 
-.cc.o:
-	g++ -c $(FLAGS) $< -o $@
+main:
+	g++ main.cc -L. $(FLAGS) -o main -lnet $(LIBS)
 
 clean:
-	rm -f main *.o
+	rm -f main *.o *.so
