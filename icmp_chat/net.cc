@@ -1,16 +1,12 @@
-#include <netdb.h>        // gethostbyname
 #include <netinet/tcp.h>  // struct tcphdr
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>       // close
-#include <cstring>
-#include <cstdio>
-#include <cstdlib>
-#include <string>
-#include <functional>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <pcap.h>
-#include <iostream>
-#include <thread>
+#include <pthread.h>
 
 #include "net.hh"
 
@@ -89,18 +85,12 @@ u_int16_t send_msg(const char* dstip, const char* buf, unsigned size)
 	return seq;
 }
 
-std::string resolve_host(const std::string& host) 
-{
-	return inet_ntoa(*((struct in_addr*) gethostbyname(host.c_str())->h_addr));
-}
-
-
 pcap_t* setup_pcap(const char* dev, const char* filter)
 {
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_t* handle = pcap_open_live(dev, PCAP_ERRBUF_SIZE, 1, 1000, errbuf);
 	if (!handle) {
-		std::cerr << "Could not open device " << dev << " " << errbuf << std::endl;
+		fprintf(stderr, "setup_pcap(): could not open device %s\n", dev);
 		return 0;
 	}
 
@@ -114,7 +104,7 @@ pcap_t* setup_pcap(const char* dev, const char* filter)
 	}
 
 	if (pcap_compile(handle, &bpf, filter, 0, net) == -1) {
-		std::cerr << "Could not set filter" << std::endl;
+		fprintf(stderr, "could not set filter\n");
 		return 0;
 	}
 
@@ -153,21 +143,37 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 	if (iphdrlen * 4 + sizeof(struct icmp) > iplen) return;
 	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(icmp) + datalen) return;
 
-	void(*callback)(std::string, int) = (void (*)(std::string, int)) args;
-	callback(std::string((const char*) packet, datalen), type);
+	void(*callback)(const char* buf, int, int) = (void (*)(const char*, int, int)) args;
+	callback((const char*) packet, datalen, type);
 }
 
-void do_callback(pcap_t* handle, void(*callback)(std::string, int)) 
+struct arguments 
 {
-	pcap_loop(handle, -1, got_packet, (u_char*) callback);
-	pcap_close(handle);
+	pcap_t* handle;
+	void(*callback)(const char*, int, int);
+};
+
+static void* do_callback(void* args)
+{
+	struct arguments* a = (struct arguments*) args;
+	pcap_loop(a->handle, -1, got_packet, (u_char*) a->callback);
+	pcap_close(a->handle);
+	free(a);
 }
 
-bool recv_callback(const char* dev, void(*callback)(std::string, int)) {
+bool recv_callback(const char* dev, void(*callback)(const char*, int, int)) {
 
 	pcap_t* handle = setup_pcap(dev, "icmp");
 	if (handle) {
-		new std::thread(do_callback, handle, callback);
+		pthread_t t;
+		struct arguments* args = (struct arguments*) malloc(sizeof(struct arguments));
+		args->handle = handle;
+		args->callback = callback;
+		int r = pthread_create(&t, NULL, &do_callback, (void*) args);
+		if (r != 0) {
+			fprintf(stderr, "could not create thread");
+			return false;
+		}
 	}
 	return (handle != 0);
 }

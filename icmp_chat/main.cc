@@ -1,3 +1,8 @@
+#include <netdb.h>        // gethostbyname
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 #include <iostream>
 #include <boost/program_options.hpp>
 
@@ -5,8 +10,9 @@
 
 namespace po = boost::program_options;
 
-void f(std::string s, int type)
+void f(const char* buf, int len, int type)
 {
+	std::string s(buf, len);
 	std::cout << s << "," << s.size() << "," << type << std::endl;
 }
 
@@ -29,9 +35,11 @@ int main(int ac, char** av)
 		return 1;
 	}
 
+	char* ip = inet_ntoa(*((struct in_addr*) gethostbyname(dsthost.c_str())->h_addr));
+
 	recv_callback("eth0", f);
 	sleep(1);
-	send_msg(resolve_host(dsthost).c_str(), "hello", 5);
+	send_msg(ip, "hello", 5);
 	sleep(2);
 }
 
