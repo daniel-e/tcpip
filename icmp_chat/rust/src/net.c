@@ -120,12 +120,14 @@ pcap_t* setup_pcap(const char* dev, const char* filter)
 struct arguments 
 {
 	pcap_t* handle;
-	void(*callback)(void*, const char*, u_int32_t, u_int32_t);
+	void(*callback)(void*, const char*, u_int32_t, u_int32_t, const char*);
 	void* target;
 };
 
 void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 {
+	char buf[128];
+
 	if (!h->len || h->len < SIZE_ETHERNET + 20) return;
 
 	packet += SIZE_ETHERNET;
@@ -133,6 +135,9 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 	u_int16_t iphdrlen = *packet & 0xf;       // little endian
 	u_int8_t  proto    = *(packet + 9);       // protocol (should be 1)
 	u_int16_t iplen    = ntohs(*(u_int16_t*)(packet + 2));
+	u_int32_t srcip    = *(u_int32_t*)(packet + 12);
+
+	inet_ntop(AF_INET, &srcip, buf, sizeof(buf));
 
 	if (iplen < iphdrlen * 4) return;
 	if (proto != 1) return;
@@ -152,7 +157,7 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(struct icmp) + datalen) return;
 
 	struct arguments* a = (struct arguments*) args;
-	a->callback(a->target, (const char*) packet, datalen, type);
+	a->callback(a->target, (const char*) packet, datalen, type, buf);
 }
 
 static void* do_callback(void* args)
@@ -164,7 +169,7 @@ static void* do_callback(void* args)
 	return 0;
 }
 
-int recv_callback(void* target, const char* dev, void(*callback)(void*, const char*, u_int32_t, u_int32_t)) {
+int recv_callback(void* target, const char* dev, void(*callback)(void*, const char*, u_int32_t, u_int32_t, const char*)) {
 
 	pcap_t* handle = setup_pcap(dev, "icmp");
 	if (handle) {

@@ -3,7 +3,7 @@ mod packet;
 #[link(name = "pcap")]
 extern {
 	fn send_icmp(ip: *const u8, buf: *const u8, siz: u16) -> u16;
-	fn recv_callback(target: *mut Network, dev: *const u8, cb: extern fn(*mut Network, *const u8, u32, u32));
+	fn recv_callback(target: *mut Network, dev: *const u8, cb: extern fn(*mut Network, *const u8, u32, u32, *const u8));
 }
 
 enum ErrorType {
@@ -13,8 +13,8 @@ enum ErrorType {
 
 
 pub struct Message {
-	ip : String,
-	buf: Vec<u8>,
+	pub ip : String,
+	pub buf: Vec<u8>,
 }
 
 impl Message {
@@ -26,94 +26,77 @@ impl Message {
 	}
 }
 
-extern "C" fn callback(target: *mut Network, buf: *const u8, len: u32, typ: u32) {
+extern "C" fn callback(target: *mut Network, buf: *const u8, len: u32, typ: u32, srcip: *const u8) {
 
 	if typ == 0 { // check only ping messages
 		unsafe {
-			(*target).callback(buf, len);
+			let mut v : Vec<u8> = vec![];
+			let mut i = 0;
+			loop {
+				let c : u8 = *srcip.offset(i);
+				if c == 0 { break }
+				v.push(*srcip.offset(i));
+				i = i + 1;
+			}
+			let ip = String::from_utf8(v).unwrap();
+			(*target).callback(buf, len, ip);
 		}
 	}
 }
-
-struct RawPacket {
-	version: u8,
-	typ: u8,
-	id: u64,
-	payload: Vec<u8>
-}
-
-fn serialize(buf: Vec<u8>, id: u64) -> Vec<u8> {
-
-	let mut v: Vec<u8> = vec![1, 16]; // version + type
-	let mut t = id;                   // id
-	for i in 0..8 {
-		v.push(t as u8);
-		t = t >> 8;
-	}
-	for k in buf {           // payload
-		v.push(k);
-	}
-	v
-}
-
-fn deserialize(buf: *const u8, len: u32) -> RawPacket {
-	let mut raw = RawPacket{
-		version: 0,
-		typ: 0,
-		id: 0,
-		payload: vec![]
-	};
-	if len >= 10 {
-		unsafe {
-			raw.version = *buf.offset(0);
-			raw.typ = *buf.offset(1);
-			for i in 0..8 {
-				raw.id = (raw.id << 8) + (*buf.offset(2 + 7 - i) as u64);
-			}
-			for i in 10..len {
-				raw.payload.push(*buf.offset(i as isize));
-			}
-		}
-	}
-	raw
-}
-
 
 pub struct Network {
+	max_message_size : usize,
 	// Packets that have been transmitted and for which we
 	// are waiting for the acknowledge.
 	packets          : Vec<packet::Packet>,
-	max_message_size : usize,
-	dev              : String
+	dev              : String,
+	callback_fn      : fn (Message)
 }
 
 impl Network {
 	/// Constructs a new `Network`.
-	pub fn new(dev: &str) -> Network {
-		let mut n = Network { 
+	pub fn new(dev: &str, cb: fn (Message)) -> Network {
+		Network { 
 			packets: vec![], 
 			max_message_size: (16 * 1024),  // 16k
 			dev: dev.to_string(),
+			callback_fn: cb,
 			// TODO: an additional layer to split larger messages
-		};
-		n.init();
-		n
+		}
 	}
 
-	pub fn init(&mut self) { // TODO: remove pub
+	pub fn init(&mut self) {
 		let sdev = self.dev.clone() + "\0";
 		unsafe {
 			recv_callback(&mut *self, sdev.as_ptr(), callback); // TODO error, eth0
 		}
 	}
 
-	pub fn callback(&mut self, buf: *const u8, len: u32) {
-		println!("recv {}", len);
-		let raw = deserialize(buf, len);
-		println!("x {}, typ {}, id {}", raw.version, raw.typ, raw.id);
-		let s = String::from_utf8(raw.payload);
-		println!("{}", s.unwrap());
-		// TODO parse message
+	/// Called by the C library.
+	pub fn callback(&mut self, buf: *const u8, len: u32, ip: String) {
+		let r = packet::Packet::deserialize(buf, len);
+		match r {
+			Some(p) => {
+				let mut ignore = false;
+				for v in &self.packets { // TODO thread-safety
+					if v.id == p.id {
+						// we are the sender of the message
+						ignore = true;
+						break;
+					}
+				}
+				ignore = false; // TODO: remove
+				if ignore == false {
+					println!("got new packet");
+					let m = Message {
+						ip: ip,
+						buf: p.data.clone()
+					};
+					(self.callback_fn)(m);
+				}
+			},
+			None => {}
+		}
 	}
 
 	/// message format:
@@ -142,15 +125,16 @@ impl Network {
 		}
 
 		let s : String = ip + "\0";
-		let p          = packet::Packet::new(s.clone(), buf.clone());
+		let p          = packet::Packet::new(buf.clone());
 		let id         = p.id;
+		let v          = p.serialize();
 
 		// We push the message before we send the message in case that
 		// the callback for ack is called before the message is in the
 		// queue.
 		self.packets.push(p); // TODO: thread-safety
 
-		let v = serialize(buf.clone(), id);
+		//let v = serialize(buf.clone(), id);
 		unsafe {
 			if send_icmp(s.as_ptr(), v.as_ptr(), v.len() as u16) != 0 { // error
 				self.packets.pop(); // TODO: thread-safety
