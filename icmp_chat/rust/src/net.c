@@ -119,9 +119,9 @@ pcap_t* setup_pcap(const char* dev, const char* filter)
 
 struct arguments 
 {
-	pcap_t* handle;
-	void(*callback)(void*, const char*, u_int32_t, u_int32_t, const char*);
-	void* target;
+	pcap_t*  handle;
+	callback cb;
+	void*    target;
 };
 
 void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
@@ -157,7 +157,7 @@ void got_packet(u_char* args, const struct pcap_pkthdr* h, const u_char* packet)
 	if (h->len < SIZE_ETHERNET + iphdrlen * 4 + sizeof(struct icmp) + datalen) return;
 
 	struct arguments* a = (struct arguments*) args;
-	a->callback(a->target, (const char*) packet, datalen, type, buf);
+	a->cb(a->target, (const char*) packet, datalen, type, buf);
 }
 
 static void* do_callback(void* args)
@@ -169,14 +169,14 @@ static void* do_callback(void* args)
 	return 0;
 }
 
-int recv_callback(void* target, const char* dev, void(*callback)(void*, const char*, u_int32_t, u_int32_t, const char*)) {
+int recv_callback(void* target, const char* dev, callback cb) {
 
 	pcap_t* handle = setup_pcap(dev, "icmp");
 	if (handle) {
 		pthread_t t;
 		struct arguments* args = (struct arguments*) malloc(sizeof(struct arguments));
 		args->handle = handle;
-		args->callback = callback;
+		args->cb = cb;
 		args->target = target;
 		int r = pthread_create(&t, NULL, &do_callback, (void*) args);
 		if (r != 0) {
