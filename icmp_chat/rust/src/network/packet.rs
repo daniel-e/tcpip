@@ -22,6 +22,15 @@ impl Packet {
 		}
 	}
 
+	pub fn clone(&self) -> Packet {
+		Packet {
+			id: self.id,
+			data: self.data.clone(),
+			created: self.created.clone(),
+			ip: self.ip.clone(),
+		}
+	}
+
 	pub fn serialize(&self) -> Vec<u8> {
 
 		// version + type

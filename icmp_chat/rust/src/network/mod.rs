@@ -127,27 +127,36 @@ impl Network {
 		let buf = msg.buf.clone();
 
 		if buf.len() > self.max_message_size {
-			return Err(Errors::MessageTooBig);
-		}
+			Err(Errors::MessageTooBig)
+		} else {
+			let p = packet::Packet::new(buf.clone(), ip.clone());
 
-		let p          = packet::Packet::new(buf.clone(), ip.clone());
-		let id         = p.id;
-		let v          = p.serialize();
-		let s : String = ip + "\0";
+			// We push the message before we send the message in case that
+			// the callback for ack is called before the message is in the
+			// queue.
+			self.packets.push(p.clone()); // TODO: thread-safety
 
-		// We push the message before we send the message in case that
-		// the callback for ack is called before the message is in the
-		// queue.
-		self.packets.push(p); // TODO: thread-safety
-
-		//let v = serialize(buf.clone(), id);
-		unsafe {
-			if send_icmp(s.as_ptr(), v.as_ptr(), v.len() as u16) != 0 { // error
-				self.packets.pop(); // TODO: thread-safety
-				return Err(Errors::SendFailed);
+			match self.transmit(p) {
+				Ok(id) => { Ok(id) }
+				Err(e) => {
+					self.packets.pop();
+					Err(e)
+				}
 			}
 		}
-		Ok(id)
+	}
+
+	fn transmit(&mut self, p: packet::Packet) -> Result<u64, Errors> {
+	
+		let v  = p.serialize();
+		let ip = p.ip.clone() + "\0";
+		unsafe {
+			if send_icmp(ip.as_ptr(), v.as_ptr(), v.len() as u16) != 0 {
+				Err(Errors::SendFailed)
+			} else {
+				Ok(p.id)
+			}
+		}
 	}
 
 
