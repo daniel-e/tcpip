@@ -9,15 +9,8 @@ use getopts::Options;
 use network::Message;
 use network::Network;
 
-fn callback(msg: Message) {
+fn parse_arguments() -> Option<(String, String)> {
 
-	let ip  = msg.ip;
-	let buf = String::from_utf8(msg.buf).unwrap();
-
-	println!("{} says: <{}>", ip, buf);
-}
-
-fn main() {
 	// parse comand line options
 	let args : Vec<String> = env::args().collect();
 
@@ -34,11 +27,29 @@ fn main() {
 	if matches.opt_present("h") {
 		let brief = format!("Usage: {} [options]", args[0]);
 		println!("{}", opts.usage(&brief));
+		None
+	} else {		
+		let device = matches.opt_str("i").unwrap_or("lo".to_string());
+		let dstip = matches.opt_str("d").unwrap_or("127.0.0.1".to_string());
+		Some((device, dstip))
+	}
+}
+
+fn callback(msg: Message) {
+
+	let ip  = msg.ip;
+	let buf = String::from_utf8(msg.buf).unwrap();
+
+	println!("{} says: <{}>", ip, buf);
+}
+
+fn main() {
+
+	let r = parse_arguments();
+	if r.is_none() {
 		return;
 	}
-		
-	let device = matches.opt_str("i").unwrap_or("lo".to_string());
-	let dstip = matches.opt_str("d").unwrap_or("127.0.0.1".to_string());
+	let (device, dstip) = r.unwrap();
 
 
 	let mut n = Network::new(device.clone(), callback);
@@ -54,12 +65,10 @@ fn main() {
 			Ok(id) => {
 				println!("main: message was sent, id = {}", id);
 			}
-			Err(e) => {
-				match e {
-					network::Errors::MessageTooBig => { println!("main: message too big"); }
-					network::Errors::SendFailed => { println!("main: sending failed"); }
-				}
-			}
+			Err(e) => { match e {
+				network::Errors::MessageTooBig => { println!("main: message too big"); }
+				network::Errors::SendFailed => { println!("main: sending failed"); }
+			}}
 		}
 		s.clear();
 	}
