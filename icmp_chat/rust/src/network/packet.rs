@@ -1,12 +1,12 @@
 extern crate rand;
 extern crate time;
 
-pub type point_id_type = (u64);
+pub type IdType = (u64);
 
 pub struct Packet {
 	// The id of the packet that is transmitted. It is used to identify
 	// the ack for that message.
-	pub id:      point_id_type,
+	pub id:      IdType,
 	pub data:    Vec<u8>,      // data packet from the caller
 	pub created: time::PreciseTime,
 	pub ip:      String,

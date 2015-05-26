@@ -2,8 +2,7 @@ mod network;
 
 use network::Message;
 use network::Network;
-use std::thread;
-
+use std::io;
 
 fn callback(msg: Message) {
 
@@ -17,27 +16,23 @@ fn main() {
 	let mut n = Network::new("lo", callback);
 
 	let dstip = "127.0.0.1";
-	let data  = "hello world".to_string().into_bytes();
-	let msg   = Message::new(dstip, data);
 
-	// Sleep one second to wait for pcap to become ready to read from
-	// the device. Maybe this is not necessary.
-	thread::sleep_ms(1000);
+	println!("You can now start writing ...");
 
-	match n.send_msg(msg) {
-		Ok(id) => { 
-			// Now, the message is in status 'transmitted'.
-			println!("message sent; message handle = {}", id); 
-		}
-		Err(e) => {
-			match e {
-				network::Errors::MessageTooBig => { println!("message too big"); }
-				network::Errors::SendFailed => { println!("2"); }
+	let mut s = String::new();
+	while io::stdin().read_line(& mut s).unwrap() != 0 {
+		let msg = Message::new(dstip, s.trim().to_string().into_bytes());
+		match n.send_msg(msg) {
+			Ok(id) => {
+				println!("main: message was sent, id = {}", id);
 			}
-			println!("error"); 
+			Err(e) => {
+				match e {
+					network::Errors::MessageTooBig => { println!("main: message too big"); }
+					network::Errors::SendFailed => { println!("main: sending failed"); }
+				}
+			}
 		}
+		s.clear();
 	}
-	
-	// Wait to seconds for the response to arrive.
-	thread::sleep_ms(2000);
 }
