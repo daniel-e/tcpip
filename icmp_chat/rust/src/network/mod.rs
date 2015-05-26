@@ -27,9 +27,9 @@ pub struct Message {
 }
 
 impl Message {
-	pub fn new(ip: &str, buf: Vec<u8>) -> Message {
+	pub fn new(ip: String, buf: Vec<u8>) -> Message {
 		Message {
-			ip : ip.to_string(),
+			ip : ip,
 			buf: buf,
 		}
 	}
@@ -83,7 +83,7 @@ extern {
 
 impl Network {
 	/// Constructs a new `Network`.
-	pub fn new(dev: &str, cb: fn (Message)) -> Box<Network> {
+	pub fn new(dev: String, cb: fn (Message)) -> Box<Network> {
 
 		let (tx, rx) = channel();
 		let s = Arc::new(Mutex::new(SharedData {
@@ -116,8 +116,8 @@ impl Network {
 		}}});
 	}
 
-	fn init_callback(&mut self, dev: &str) {
-		let sdev = dev.to_string() + "\0";
+	fn init_callback(&mut self, dev: String) {
+		let sdev = dev.clone() + "\0";
 		unsafe {
 			recv_callback(&mut *self, sdev.as_ptr(), callback); // TODO error handling
 		}
