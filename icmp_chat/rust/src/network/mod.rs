@@ -4,9 +4,10 @@ extern crate libc;
 
 mod packet;
 
+// TODO retry
+// TODO ack
 // TODO an additional layer to split larger messages into chunks
 // TODO constant for maximum message size
-// TODO retry
 
 use std::thread;
 use std::sync::Arc;
@@ -38,7 +39,7 @@ impl Message {
 
 fn string_from_cstr(cstr: *const u8) -> String {
 
-	let mut v : Vec<u8> = vec![];
+	let mut v: Vec<u8> = vec![];
 	let mut i = 0;
 	loop { unsafe {
 		let c = *cstr.offset(i);
@@ -140,7 +141,6 @@ impl Network {
 					}
 				}
 				if ignore == false {
-					println!("got new packet");
 					let m = Message {
 						ip: ip,
 						buf: p.data.clone()
@@ -210,8 +210,6 @@ impl Network {
 
 	fn transmit(&self, p: &packet::Packet) -> bool {
 	
-		println!("transmit {}, {}", p.id, p.ip);
-
 		let v  = p.serialize();
 		let ip = p.ip.clone() + "\0";
 		unsafe {

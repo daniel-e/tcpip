@@ -63,7 +63,7 @@ fn main() {
 		let msg = Message::new(dstip.clone(), s.trim().to_string().into_bytes());
 		match n.send_msg(msg) {
 			Ok(id) => {
-				println!("main: message was sent, id = {}", id);
+				println!("* transmitting... (id = {})", id);
 			}
 			Err(e) => { match e {
 				network::Errors::MessageTooBig => { println!("main: message too big"); }
