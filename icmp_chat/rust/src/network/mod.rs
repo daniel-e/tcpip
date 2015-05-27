@@ -3,11 +3,7 @@ extern crate time;
 extern crate libc;
 
 mod packet;
-
-// TODO retry
-// TODO ack
-// TODO an additional layer to split larger messages into chunks
-// TODO constant for maximum message size
+mod tools;
 
 use std::thread;
 use std::sync::Arc;
@@ -20,7 +16,6 @@ pub enum Errors {
 	MessageTooBig,
 	SendFailed
 }
-
 
 pub struct Message {
 	pub ip : String,
@@ -36,41 +31,17 @@ impl Message {
 	}
 }
 
+const RETRY_TIMEOUT: u32      = 5000;
+const MAX_MESSAGE_SIZE: usize = (10 * 1024);
 
-fn string_from_cstr(cstr: *const u8) -> String {
 
-	let mut v: Vec<u8> = vec![];
-	let mut i = 0;
-	loop { unsafe {
-		let c = *cstr.offset(i);
-		if c == 0 { break; } else { v.push(c); }
-		i += 1;
-	} }
-	String::from_utf8(v).unwrap()
-}
+// Callback functions.------------------------------------------------------------------
 
-struct SharedData {
-	// Packets that have been transmitted and for which we
-	// are waiting for the acknowledge.
-	packets          : Vec<packet::Packet>,
-	transmitted      : Vec<(packet::IdType, time::PreciseTime)>,
-}
-	
-
-#[repr(C)]
-pub struct Network {
-	max_message_size : usize,
-	callback_fn      : fn (Message),
-	tx               : Sender<packet::IdType>,
-	shared           : Arc<Mutex<SharedData>>
-}
-
+/// Callback function called by the ICMP C library.
 extern "C" fn callback(target: *mut Network, buf: *const u8, len: u32, typ: u32, srcip: *const u8) {
 
 	if typ == 0 { // check only ping messages
-		unsafe {
-			(*target).recv_packet(buf, len, string_from_cstr(srcip));
-		}
+		unsafe { (*target).recv_packet(buf, len, tools::string_from_cstr(srcip)); }
 	}
 }
 
@@ -82,14 +53,30 @@ extern {
 		cb: extern fn(*mut Network, *const u8, u32, u32, *const u8)) -> libc::c_int;
 }
 
+// -------------------------------------------------------------------------------------
+
+struct SharedData {
+	// Packets that have been transmitted and for which we
+	// are waiting for the acknowledge.
+	packets          : Vec<packet::Packet>,
+}
+	
+
+#[repr(C)]
+pub struct Network {
+	new_msg_cb       : fn (Message),
+	ack_msg_cb       : fn (u64),
+	tx               : Sender<packet::IdType>,
+	shared           : Arc<Mutex<SharedData>>
+}
+
 impl Network {
 	/// Constructs a new `Network`.
-	pub fn new(dev: String, cb: fn (Message)) -> Box<Network> {
+	pub fn new(dev: String, new_msg_cb: fn (Message), ack_msg_cb: fn (u64)) -> Box<Network> {
 
 		let (tx, rx) = channel();
 		let s = Arc::new(Mutex::new(SharedData {
 			packets : vec![],
-			transmitted: vec![],
 		}));
 		
 		let k = s.clone();
@@ -97,8 +84,8 @@ impl Network {
 		// Network must be on the heap because of the callback function.
 		let mut n = Box::new(Network {
 			shared: s,
-			max_message_size: (16 * 1024),  // 16k
-			callback_fn: cb,
+			new_msg_cb: new_msg_cb,
+            ack_msg_cb: ack_msg_cb,
 			tx: tx,
 		});
 
@@ -108,10 +95,16 @@ impl Network {
 	}
 
 	fn init_retry_event_receiver(&self, rx: Receiver<packet::IdType>, k: Arc<Mutex<SharedData>>) {
+        let tx = self.tx.clone();
 		thread::spawn(move || { loop { match rx.recv() {
 			Ok(id) => {
-				let shared = k.lock().unwrap();
-				println!("got retry event for id {}", id);
+				let v = k.lock().unwrap();
+                for i in &v.packets {
+                    if i.id == id {
+                        Network::transmit(i.clone());
+                        Network::init_retry(tx.clone(), id);
+                    }
+                }
 			}
 			_ => { println!("error in receiving"); }
 		}}});
@@ -124,33 +117,65 @@ impl Network {
 		}
 	}
 
-	pub fn recv_packet(&self, buf: *const u8, len: u32, ip: String) {
-		let r = packet::Packet::deserialize(buf, len);
+	pub fn recv_packet(&mut self, buf: *const u8, len: u32, ip: String) {
+		let r = packet::Packet::deserialize(buf, len, ip);
 		match r {
 			Some(p) => {
-				let mut ignore = false;
-				let s = self.shared.clone();
-				let k = s.lock().unwrap();
-				for v in &k.packets { // TODO thread-safety
-					println!("v.id = {}", v.id);
-					if v.id == p.id {
-						// we are the sender of the message because
-						// the message is queued
-						// ignore = true;
-						// break;
-					}
-				}
-				if ignore == false {
-					let m = Message {
-						ip: ip,
-						buf: p.data.clone()
-					};
-					(self.callback_fn)(m);
-				}
+                if p.is_new_message() {
+                    self.handle_new_message(p);
+                } else if p.is_ack() {
+                    self.handle_ack(p);
+                } else {
+                    println!("recv_packet: unknown packet type");
+                }
 			},
 			None => { println!("recv_packet: could not deserialize received packet"); }
 		}
 	}
+
+    fn contains(&self, id: packet::IdType) -> bool {
+
+		let shared = self.shared.clone();
+		let v = shared.lock().unwrap();
+        for i in &v.packets {
+            if i.id == id {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn handle_new_message(&self, p: packet::Packet) {
+        
+        if !self.contains(p.id) { // we are not the sender of the message
+   			let m = Message {
+				ip: p.ip.clone(),
+				buf: p.data.clone()
+			};
+			(self.new_msg_cb)(m);
+            Network::transmit(packet::Packet::create_ack(p));
+            // TODO error
+        }
+    }
+
+    fn handle_ack(&mut self, p: packet::Packet) {
+
+  		let shared = self.shared.clone();
+		let mut v = shared.lock().unwrap();
+        let mut c = 0;
+        let mut b: bool = false;
+        for i in &v.packets {
+            if i.id == p.id {
+                b = true;
+                break;
+            }
+            c += 1;
+        }
+        if b {
+            v.packets.swap_remove(c);
+            (self.ack_msg_cb)(p.id);
+        }
+  }
 
 	/// message format:
 	/// u8 : version { 1 }
@@ -173,7 +198,7 @@ impl Network {
 		let ip  = msg.ip.clone();
 		let buf = msg.buf.clone();
 
-		if buf.len() > self.max_message_size {
+		if buf.len() > MAX_MESSAGE_SIZE {
 			Err(Errors::MessageTooBig)
 		} else {
 			let p = packet::Packet::new(buf.clone(), ip.clone());
@@ -185,9 +210,8 @@ impl Network {
 			let mut k = v.lock().unwrap();
 			k.packets.push(p.clone());
 
-			if self.transmit(&p) {
-				k.transmitted.push((p.id, time::PreciseTime::now()));
-				self.init_retry(p.id);
+			if Network::transmit(p.clone()) {
+				Network::init_retry(self.tx.clone(), p.id);
 				Ok(p.id) 
 			} else {
 				k.packets.pop();
@@ -196,11 +220,10 @@ impl Network {
 		}
 	}
 
-	fn init_retry(&self, id: packet::IdType) {
+	fn init_retry(tx: Sender<u64>, id: packet::IdType) {
 
-		let tx = self.tx.clone();
 		thread::spawn(move || { 
-			thread::sleep_ms(300);
+			thread::sleep_ms(RETRY_TIMEOUT);
 			match tx.send(id) {
 				Err(_) => { println!("init_retry: sending event through channel failed"); }
 				_ => { }
@@ -208,7 +231,7 @@ impl Network {
 		});
 	}
 
-	fn transmit(&self, p: &packet::Packet) -> bool {
+	fn transmit(p: packet::Packet) -> bool {
 	
 		let v  = p.serialize();
 		let ip = p.ip.clone() + "\0";

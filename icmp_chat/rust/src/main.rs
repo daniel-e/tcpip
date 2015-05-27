@@ -35,12 +35,25 @@ fn parse_arguments() -> Option<(String, String)> {
 	}
 }
 
-fn callback(msg: Message) {
+/// This callback function is called when a new message arrives.
+fn new_message(msg: Message) {
 
 	let ip  = msg.ip;
 	let buf = String::from_utf8(msg.buf).unwrap();
 
 	println!("{} says: <{}>", ip, buf);
+}
+
+/// This callback function is called when the receiver has received the
+/// message with the given id.
+///
+/// Important notes: Acknowledges are not protected on this layer. An
+/// attacker could drop acknowledges or could fake acknowledges. Therefore,
+/// it is important that acknowledges are handled on a higher layer where
+/// they can be protected via cryptographic mechanisms.
+fn ack_message(id: u64) {
+
+    println!("* ack.            (id = {})", id);
 }
 
 fn main() {
@@ -52,7 +65,7 @@ fn main() {
 	let (device, dstip) = r.unwrap();
 
 
-	let mut n = Network::new(device.clone(), callback);
+	let mut n = Network::new(device.clone(), new_message, ack_message);
 
 	println!("Device is        : {}", device);
 	println!("Destination IP is: {}", dstip);
