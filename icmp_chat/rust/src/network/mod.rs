@@ -74,23 +74,23 @@ impl Network {
 	/// Constructs a new `Network`.
 	pub fn new(dev: String, new_msg_cb: fn (Message), ack_msg_cb: fn (u64)) -> Box<Network> {
 
-		let (tx, rx) = channel();
 		let s = Arc::new(Mutex::new(SharedData {
 			packets : vec![],
 		}));
-		
-		let k = s.clone();
+
+        // Create a channel to transport retry events.
+		let (tx, rx) = channel();
 
 		// Network must be on the heap because of the callback function.
 		let mut n = Box::new(Network {
-			shared: s,
+			shared: s.clone(),
 			new_msg_cb: new_msg_cb,
             ack_msg_cb: ack_msg_cb,
 			tx: tx,
 		});
 
 		n.init_callback(dev);
-		n.init_retry_event_receiver(rx, k);
+		n.init_retry_event_receiver(rx, s.clone());
 		n
 	}
 

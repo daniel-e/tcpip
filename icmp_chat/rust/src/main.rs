@@ -1,4 +1,5 @@
 mod network;
+mod logo;
 
 extern crate getopts;
 
@@ -57,6 +58,7 @@ fn ack_message(id: u64) {
 }
 
 fn main() {
+    logo::print_logo();
 
 	let r = parse_arguments();
 	if r.is_none() {
