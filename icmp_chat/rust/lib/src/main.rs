@@ -1,14 +1,15 @@
+mod network;
 mod logo;
+mod crypto;
 
 extern crate getopts;
-extern crate icmp;
 
 use std::env;
 use std::io;
 use getopts::Options;
 
-use icmp::network::Message;
-use icmp::network::Network;
+use network::Message;
+use network::Network;
 
 fn parse_arguments() -> Option<(String, String)> {
 
@@ -81,8 +82,8 @@ fn main() {
 				println!("* transmitting... (id = {})", id);
 			}
 			Err(e) => { match e {
-				icmp::network::Errors::MessageTooBig => { println!("main: message too big"); }
-				icmp::network::Errors::SendFailed => { println!("main: sending failed"); }
+				network::Errors::MessageTooBig => { println!("main: message too big"); }
+				network::Errors::SendFailed => { println!("main: sending failed"); }
 			}}
 		}
 		s.clear();

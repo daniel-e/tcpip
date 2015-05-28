@@ -1,6 +1,6 @@
 [package]
 
-name = "icmp"
+name = "hello"
 version = "0.0.1"
 authors = ["bla"]
 build = "build.rs"
