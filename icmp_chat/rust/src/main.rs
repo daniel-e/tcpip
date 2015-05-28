@@ -1,5 +1,6 @@
 mod network;
 mod logo;
+mod crypto;
 
 extern crate getopts;
 
